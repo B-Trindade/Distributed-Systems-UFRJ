@@ -38,7 +38,7 @@ try:
         print('Echo> ' + str(echo, encoding='utf-8'))
         print()
 except socket.error as e:
-    print('Error durante envio/recebimento de mensagem: %s' % e)
+    print('Erro durante envio/recebimento de mensagem: %s' % e)
     raise SystemExit
 finally:
     sckt.close()
