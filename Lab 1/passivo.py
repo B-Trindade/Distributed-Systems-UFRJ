@@ -19,8 +19,8 @@ print('Conectado com: ' + str(endereco))
 while True:
     msg = novoSckt.recv(1024)
     if not msg: break
-    print(str(msg, encoding='utf-8'))
-    novoSckt.send(b'Ola, sou o lado passivo!')
+    print('Mensagem recebida: ' + str(msg, encoding='utf-8'))
+    novoSckt.send(msg)
 
 novoSckt.close()
 
