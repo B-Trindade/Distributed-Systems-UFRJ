@@ -1,0 +1,7 @@
+teste de palavras no arquivo de texto usando a mesma linha: teste mais uma vez
+usando
+mais
+linhas
+para
+testar
+fim
