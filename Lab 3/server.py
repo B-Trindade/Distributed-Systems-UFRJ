@@ -8,10 +8,19 @@ import select as s
 HOST = ''
 PORT = 5000
 ENCODING = 'utf-8'
+
+# Lista de comandos
 EXIT_KEYWORD = '$exit'
+LIST_THREADS = { '$list threads', '$lt' }
+LIST_CLIENTS = { '$list clients', '$lc'}
+HELP = '$help'
 
 # Entradas para esculta do select
 entry_points = [sys.stdin]
+# Mapa de conexoes com o servidor
+connections = {}
+# Lock para acessar o dicionario de conexoes
+lock = threading.Lock()
 
 def initServer():
     """
@@ -44,13 +53,13 @@ def requestHandler(newSckt, address):
         file_name = newSckt.recv(1024)
 
         if not file_name:
-                file_unavailable(newSckt, address)
+                file_unavailable(newSckt, address) # Lida com o encerramento da conexao
                 return None
 
         file_name = str(file_name, encoding=ENCODING)
         print(f'{address}: solicitacao de busca no arquivo "{file_name}".') # Log
 
-        data = get_file(file_name)
+        data = get_file(file_name)  # Busca pelo arquivo solicitado
         if data is not None:
             # Envia feedback para cliente
             msg = 'Arquivo encontrado com sucesso!'
@@ -60,23 +69,23 @@ def requestHandler(newSckt, address):
             # Recebe a palavra de busca. Caso nao receba, termina
             search_query = newSckt.recv(1024)
             if not file_name:
-                file_unavailable(newSckt, address)
+                file_unavailable(newSckt, address) # Lida com o encerramento da conexao
                 return None
 
             search_query = str(search_query, encoding=ENCODING)
             print(f'{address}: solicitacao de busca por "{search_query}" em {file_name}.') # Log
 
             # Envia mensagem de conclusao para o cliente
-            word_count = data.count(search_query)
+            word_count = data.count(search_query)   # Realiza operacao de contagem no arquivo
             response = f'O arquivo "{file_name}" possui um total de {word_count} instancias da palavra "{search_query}".'
             newSckt.send(response.encode(ENCODING))
 
-            print(f'Busca bem sucedida. Resposta enviada para {address}.')
+            print(f'Busca bem sucedida. Resposta enviada para {address}.') # Log
         else:
             # Falha ao buscar pelo arquivo
             err_msg = 'Falha: Arquivo nao encontrado.'
             newSckt.send(err_msg.encode(ENCODING))
-            print(f'Arquivo nao encontrado. Mensagem de falha enviada para {address}.')
+            print(f'Arquivo nao encontrado. Mensagem de falha enviada para {address}.') # Log
     
     pass
 
@@ -86,6 +95,29 @@ def internalCommandHandler(cmd: str, sckt, clients: list):
             c.join()
         sckt.close()
         sys.exit()
+    elif cmd in LIST_THREADS:
+        print('\nLista de threads ativas:')
+        for thread in threading.enumerate():
+            print(f' - {thread}')
+        print()
+    elif cmd in LIST_CLIENTS:
+        if connections:
+            print('\nLista de clientes ativos:')
+            for k,v in connections.items():
+                print(f' - {v}')
+        else:
+            print('\n Nao ha conexoes ativas no momento.')
+        print()
+    elif cmd == HELP:
+        print('Lista de comandos:\n')
+        print(f'"{EXIT_KEYWORD}"\t > Bloqueia novos pedidos de conexao e encerra o servidor quando nao houver cliente.')
+        for item in LIST_CLIENTS:
+            print(f'"{item}"\t > Exibe a lista de enderecos de clientes conectados.')
+        for item in LIST_THREADS:
+            print(f'"{item}"\t > Exibe a lista de threads ativas.')
+        print(f'"{HELP}"\t > Exibe lista de comandos para entrada padrao do servidor.\n')
+
+
     pass
 
 def get_file(file_name: str):
@@ -104,6 +136,11 @@ def file_unavailable(newSckt, address):
     Modularizacao do codigo que lida com encerramento da conexao
     """
     print(f'{str(address)}> Encerrou a conexao')
+
+    # Protecao contra eventuais alteracoes na estrutura por outras threads
+    lock.acquire()
+    del connections[newSckt]
+    lock.release()
 
     # Encerra a conexao
     newSckt.close()
@@ -133,6 +170,11 @@ def main():
         
                     # Adiciona a nova thread na lista de threads ativas
                     client_threads.append(client)
+
+                    # Protecao contra alteracoes problematicas por multithreading 
+                    lock.acquire()
+                    connections[client_sckt] = client_addr  # Adiciona a conexao nova ao mapa de conexoes
+                    lock.release()
                 elif ready == sys.stdin:
                     # Permite interacao com o servidor
                     cmd = input()
