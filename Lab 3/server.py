@@ -10,7 +10,7 @@ PORT = 5000
 ENCODING = 'utf-8'
 EXIT_KEYWORD = '$exit'
 
-connections = {}
+# Entradas para esculta do select
 entry_points = [sys.stdin]
 
 def initServer():
@@ -38,61 +38,54 @@ def acceptConnection(sckt):
         
 def requestHandler(newSckt, address):
     
-    # Recebe mensagem com o nome do arquivo a ser bucado,
-    # caso nao receba, termina a conexao atual
-    file_name = newSckt.recv(1024)
+    while True:
+        # Recebe mensagem com o nome do arquivo a ser bucado,
+        # caso nao receba, termina a conexao atual
+        file_name = newSckt.recv(1024)
 
-    if not file_name:
-            print(f'{str(address)}> Encerrou a conexao')
-            del connections[newSckt]
-            entry_points.remove(newSckt)
-            newSckt.close()
-            return None
-
-    file_name = str(file_name, encoding=ENCODING)
-    print(f'{address}: solicitacao de busca no arquivo "{file_name}".') # Log
-
-    data = get_file(file_name)
-    if data is not None:
-        # Envia feedback para cliente
-        msg = 'Arquivo encontrado com sucesso!'
-        print('Enviando mensgem de sucesso...') 
-        newSckt.send(msg.encode(ENCODING))
-
-        # Recebe a palavra de busca. Caso nao receba, termina
-        search_query = newSckt.recv(1024)
         if not file_name:
-            print(f'{str(address)}> Encerrou a conexao')
-            del connections[newSckt]
-            entry_points.remove(newSckt)
-            newSckt.close()
-            return None
+                file_unavailable(newSckt, address)
+                return None
 
-        search_query = str(search_query, encoding=ENCODING)
-        print(f'{address}: solicitacao de busca por "{search_query}" em {file_name}.') # Log
+        file_name = str(file_name, encoding=ENCODING)
+        print(f'{address}: solicitacao de busca no arquivo "{file_name}".') # Log
 
-        # Envia mensagem de conclusao para o cliente
-        word_count = data.count(search_query)
-        response = f'O arquivo "{file_name}" possui um total de {word_count} instancias da palavra "{search_query}".'
-        newSckt.send(response.encode(ENCODING))
+        data = get_file(file_name)
+        if data is not None:
+            # Envia feedback para cliente
+            msg = 'Arquivo encontrado com sucesso!'
+            print('Enviando mensgem de sucesso...') 
+            newSckt.send(msg.encode(ENCODING))
 
-        print(f'Busca bem sucedida. Resposta enviada para {address}.')
-    else:
-        # Falha ao buscar pelo arquivo
-        err_msg = 'Falha: Arquivo nao encontrado.'
-        print('Enviando mensagem de falha...')
-        newSckt.send(err_msg.encode(ENCODING))
-            
+            # Recebe a palavra de busca. Caso nao receba, termina
+            search_query = newSckt.recv(1024)
+            if not file_name:
+                file_unavailable(newSckt, address)
+                return None
+
+            search_query = str(search_query, encoding=ENCODING)
+            print(f'{address}: solicitacao de busca por "{search_query}" em {file_name}.') # Log
+
+            # Envia mensagem de conclusao para o cliente
+            word_count = data.count(search_query)
+            response = f'O arquivo "{file_name}" possui um total de {word_count} instancias da palavra "{search_query}".'
+            newSckt.send(response.encode(ENCODING))
+
+            print(f'Busca bem sucedida. Resposta enviada para {address}.')
+        else:
+            # Falha ao buscar pelo arquivo
+            err_msg = 'Falha: Arquivo nao encontrado.'
+            newSckt.send(err_msg.encode(ENCODING))
+            print(f'Arquivo nao encontrado. Mensagem de falha enviada para {address}.')
     
     pass
 
-def internalCommandHandler(cmd: str, sckt):
+def internalCommandHandler(cmd: str, sckt, clients: list):
     if cmd == EXIT_KEYWORD:
-        if not connections:
-            sckt.close()
-            sys.exit()
-        else:
-            print('Ha conexoes pendentes.')
+        for c in clients:
+            c.join()
+        sckt.close()
+        sys.exit()
     pass
 
 def get_file(file_name: str):
@@ -106,12 +99,25 @@ def get_file(file_name: str):
     except:
         return None
 
+def file_unavailable(newSckt, address):
+    """
+    Modularizacao do codigo que lida com encerramento da conexao
+    """
+    print(f'{str(address)}> Encerrou a conexao')
+
+    # Encerra a conexao
+    newSckt.close()
+    pass
+
 def main():
     try:
         sckt = initServer()
         print('Pronto para receber conexoes...')
         print(f'Para encerrar o servico, digite "{EXIT_KEYWORD}".')
         entry_points.append(sckt)
+
+        # Lista de threads ativas
+        client_threads = [] 
 
         while True:
             r, w, x = s.select(entry_points, [], [])
@@ -121,15 +127,16 @@ def main():
                     # Aceita a conexao
                     client_sckt, client_addr = acceptConnection(sckt) 
 
-                    # Adiciona a conexao a lista de conexoes e mapeia (key:conexao, val:endereco)
-                    entry_points.insert(0, client_sckt)
-                    connections[client_sckt] = client_addr
+                    # Cria a nova thread que ira lidar com a conexao
+                    client = threading.Thread(target=requestHandler, args=(client_sckt, client_addr))
+                    client.start()
+        
+                    # Adiciona a nova thread na lista de threads ativas
+                    client_threads.append(client)
                 elif ready == sys.stdin:
                     # Permite interacao com o servidor
                     cmd = input()
-                    internalCommandHandler(cmd, sckt)
-                else:
-                    requestHandler(ready, connections.get(ready))
+                    internalCommandHandler(cmd, sckt, client_threads)
 
     except socket.error as e:
         print('Erro: %s' % e)
